@@ -3,12 +3,14 @@ package status
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal"
 	"github.com/sipeed/picoclaw/pkg/auth"
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
-func statusCmd() {
+func statusCmd(agentID string) {
 	cfg, err := internal.LoadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
@@ -39,6 +41,40 @@ func statusCmd() {
 	}
 
 	if _, err := os.Stat(configPath); err == nil {
+		// Show agents section
+		fmt.Println()
+		fmt.Println("Agents:")
+
+		// If specific agent requested, show only that one
+		if agentID != "" {
+			agent := cfg.GetAgentByID(agentID)
+			if agent == nil {
+				fmt.Printf("  ✗ Agent %q not found\n", agentID)
+			} else {
+				displayAgent(agent, cfg, true)
+			}
+		} else {
+			// Show default agent
+			displayDefaultAgent(&cfg.Agents.Defaults)
+
+			// Show all agents from the map (sorted alphabetically)
+			if len(cfg.Agents.Agents) > 0 {
+				// Get sorted list of agent IDs
+				agentIDs := make([]string, 0, len(cfg.Agents.Agents))
+				for id := range cfg.Agents.Agents {
+					agentIDs = append(agentIDs, id)
+				}
+				sort.Strings(agentIDs)
+
+				for _, id := range agentIDs {
+					agent := cfg.Agents.Agents[id]
+					agent.ID = id // Set the ID from the map key
+					displayAgent(&agent, cfg, false)
+				}
+			}
+		}
+
+		fmt.Println()
 		fmt.Printf("Model: %s\n", cfg.Agents.Defaults.GetModelName())
 
 		hasOpenRouter := cfg.Providers.OpenRouter.APIKey != ""
@@ -97,4 +133,37 @@ func statusCmd() {
 			}
 		}
 	}
+}
+
+// displayDefaultAgent shows the default agent configuration
+func displayDefaultAgent(defaults *config.AgentDefaults) {
+	model := defaults.GetModelName()
+	if model == "" {
+		model = "(not set)"
+	}
+	fmt.Printf("  %-10s (default)  workspace: %s, model: %s\n",
+		"default", defaults.Workspace, model)
+}
+
+// displayAgent shows an agent from the agents list, merging with defaults
+func displayAgent(agent *config.AgentConfig, cfg *config.Config, isSelected bool) {
+	prefix := "  "
+	if isSelected {
+		prefix = "  → "
+	}
+
+	// Use GetMergedAgentDefaults for consistent merging logic
+	merged, err := cfg.GetMergedAgentDefaults(agent.ID)
+	if err != nil {
+		// Fallback to defaults if merge fails
+		merged = cfg.Agents.Defaults
+	}
+
+	model := merged.GetModelName()
+	if model == "" {
+		model = "(not set)"
+	}
+
+	fmt.Printf("%s%-10s  workspace: %s, model: %s\n",
+		prefix, agent.ID, merged.Workspace, model)
 }

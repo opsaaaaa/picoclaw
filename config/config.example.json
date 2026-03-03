@@ -7,6 +7,21 @@
       "max_tokens": 8192,
       "temperature": 0.7,
       "max_tool_iterations": 20
+    },
+    "web-search": {
+      "name": "Web Search Agent",
+      "workspace": "~/web-search",
+      "model": "gpt-4o",
+      "skills": ["web_search", "brave_search"]
+    },
+    "code-review": {
+      "name": "Code Review Agent",
+      "workspace": "~/code-reviews",
+      "model": {
+        "primary": "claude-sonnet-4",
+        "fallbacks": ["gpt-4o-mini"]
+      },
+      "max_tool_iterations": 50
     }
   },
   "model_list": [

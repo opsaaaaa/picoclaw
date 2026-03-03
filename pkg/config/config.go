@@ -86,8 +86,57 @@ func (c Config) MarshalJSON() ([]byte, error) {
 }
 
 type AgentsConfig struct {
-	Defaults AgentDefaults `json:"defaults"`
-	List     []AgentConfig `json:"list,omitempty"`
+	Defaults AgentDefaults          `json:"defaults"`
+	Agents   map[string]AgentConfig `json:"-"` // Populated by custom unmarshal
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for AgentsConfig
+// to support the flat structure where agents are direct properties
+// alongside "defaults", not nested in a sub-object.
+func (a *AgentsConfig) UnmarshalJSON(data []byte) error {
+	// First unmarshal to a generic map to separate defaults from agents
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Unmarshal the "defaults" field if present
+	if defaultsData, ok := raw["defaults"]; ok {
+		if err := json.Unmarshal(defaultsData, &a.Defaults); err != nil {
+			return fmt.Errorf("error unmarshaling agents.defaults: %w", err)
+		}
+		delete(raw, "defaults")
+	}
+
+	// Everything else is an agent
+	a.Agents = make(map[string]AgentConfig)
+	for key, agentData := range raw {
+		var agent AgentConfig
+		if err := json.Unmarshal(agentData, &agent); err != nil {
+			return fmt.Errorf("error unmarshaling agent %q: %w", key, err)
+		}
+		agent.ID = key // Set the ID from the map key
+		a.Agents[key] = agent
+	}
+
+	return nil
+}
+
+// MarshalJSON implements custom JSON marshaling for AgentsConfig
+// to maintain the flat structure.
+func (a AgentsConfig) MarshalJSON() ([]byte, error) {
+	// Create a map with defaults and all agents at the same level
+	result := make(map[string]interface{})
+
+	// Always include defaults
+	result["defaults"] = a.Defaults
+
+	// Add all agents
+	for id, agent := range a.Agents {
+		result[id] = agent
+	}
+
+	return json.Marshal(result)
 }
 
 // AgentModelConfig supports both string and structured model config.
@@ -130,8 +179,7 @@ func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
 }
 
 type AgentConfig struct {
-	ID        string            `json:"id"`
-	Default   bool              `json:"default,omitempty"`
+	ID        string            `json:"-"` // Set from map key during unmarshal
 	Name      string            `json:"name,omitempty"`
 	Workspace string            `json:"workspace,omitempty"`
 	Model     *AgentModelConfig `json:"model,omitempty"`
@@ -712,6 +760,56 @@ func SaveConfig(path string, cfg *Config) error {
 
 func (c *Config) WorkspacePath() string {
 	return expandHome(c.Agents.Defaults.Workspace)
+}
+
+// GetAgentByID returns the AgentConfig with the given ID from the agents map.
+// Returns nil if not found.
+func (c *Config) GetAgentByID(id string) *AgentConfig {
+	if agent, ok := c.Agents.Agents[id]; ok {
+		// Set the ID field from the map key
+		agent.ID = id
+		return &agent
+	}
+	return nil
+}
+
+// GetMergedAgentDefaults returns a merged AgentDefaults by combining the global
+// defaults with the specified agent's configuration from the agents map.
+// The agent's settings override the defaults where specified.
+// Returns an error if the agent ID is not found.
+func (c *Config) GetMergedAgentDefaults(agentID string) (AgentDefaults, error) {
+	agent := c.GetAgentByID(agentID)
+	if agent == nil {
+		return AgentDefaults{}, fmt.Errorf("agent with ID %q not found in agents config", agentID)
+	}
+
+	// Start with a deep copy of defaults
+	merged := c.Agents.Defaults
+
+	// Apply agent-specific overrides
+	if agent.Workspace != "" {
+		merged.Workspace = agent.Workspace
+	}
+	if agent.Model != nil {
+		if agent.Model.Primary != "" {
+			merged.ModelName = agent.Model.Primary
+		}
+		if len(agent.Model.Fallbacks) > 0 {
+			merged.ModelFallbacks = agent.Model.Fallbacks
+		}
+	}
+
+	return merged, nil
+}
+
+// WorkspacePathForAgent returns the workspace path for a specific agent,
+// merging the agent's config with defaults.
+func (c *Config) WorkspacePathForAgent(agentID string) (string, error) {
+	defaults, err := c.GetMergedAgentDefaults(agentID)
+	if err != nil {
+		return "", err
+	}
+	return expandHome(defaults.Workspace), nil
 }
 
 func (c *Config) GetAPIKey() string {
