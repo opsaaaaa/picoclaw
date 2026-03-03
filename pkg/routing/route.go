@@ -220,33 +220,14 @@ func (r *RouteResolver) pickAgentID(agentID string) string {
 		return NormalizeAgentID(r.resolveDefaultAgentID())
 	}
 	normalized := NormalizeAgentID(trimmed)
-	agents := r.cfg.Agents.List
-	if len(agents) == 0 {
+	// Check if the agent exists in the agents map
+	if _, ok := r.cfg.Agents.Agents[trimmed]; ok {
 		return normalized
-	}
-	for _, a := range agents {
-		if NormalizeAgentID(a.ID) == normalized {
-			return normalized
-		}
 	}
 	return NormalizeAgentID(r.resolveDefaultAgentID())
 }
 
 func (r *RouteResolver) resolveDefaultAgentID() string {
-	agents := r.cfg.Agents.List
-	if len(agents) == 0 {
-		return DefaultAgentID
-	}
-	for _, a := range agents {
-		if a.Default {
-			id := strings.TrimSpace(a.ID)
-			if id != "" {
-				return NormalizeAgentID(id)
-			}
-		}
-	}
-	if id := strings.TrimSpace(agents[0].ID); id != "" {
-		return NormalizeAgentID(id)
-	}
+	// Always use the default agent from agents.defaults
 	return DefaultAgentID
 }

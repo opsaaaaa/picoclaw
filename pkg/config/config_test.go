@@ -72,25 +72,20 @@ func TestAgentConfig_FullParse(t *testing.T) {
 				"max_tokens": 8192,
 				"max_tool_iterations": 20
 			},
-			"list": [
-				{
-					"id": "sales",
-					"default": true,
-					"name": "Sales Bot",
-					"model": "gpt-4"
+			"sales": {
+				"name": "Sales Bot",
+				"model": "gpt-4"
+			},
+			"support": {
+				"name": "Support Bot",
+				"model": {
+					"primary": "claude-opus",
+					"fallbacks": ["haiku"]
 				},
-				{
-					"id": "support",
-					"name": "Support Bot",
-					"model": {
-						"primary": "claude-opus",
-						"fallbacks": ["haiku"]
-					},
-					"subagents": {
-						"allow_agents": ["sales"]
-					}
+				"subagents": {
+					"allow_agents": ["sales"]
 				}
-			]
+			}
 		},
 		"bindings": [
 			{
@@ -115,19 +110,25 @@ func TestAgentConfig_FullParse(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if len(cfg.Agents.List) != 2 {
-		t.Fatalf("agents.list len = %d, want 2", len(cfg.Agents.List))
+	if len(cfg.Agents.Agents) != 2 {
+		t.Fatalf("agents map len = %d, want 2", len(cfg.Agents.Agents))
 	}
 
-	sales := cfg.Agents.List[0]
-	if sales.ID != "sales" || !sales.Default || sales.Name != "Sales Bot" {
+	sales, ok := cfg.Agents.Agents["sales"]
+	if !ok {
+		t.Fatalf("agent 'sales' not found in agents map")
+	}
+	if sales.ID != "sales" || sales.Name != "Sales Bot" {
 		t.Errorf("sales = %+v", sales)
 	}
 	if sales.Model == nil || sales.Model.Primary != "gpt-4" {
 		t.Errorf("sales.Model = %+v", sales.Model)
 	}
 
-	support := cfg.Agents.List[1]
+	support, ok := cfg.Agents.Agents["support"]
+	if !ok {
+		t.Fatalf("agent 'support' not found in agents map")
+	}
 	if support.ID != "support" || support.Name != "Support Bot" {
 		t.Errorf("support = %+v", support)
 	}
@@ -181,8 +182,8 @@ func TestConfig_BackwardCompat_NoAgentsList(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if len(cfg.Agents.List) != 0 {
-		t.Errorf("agents.list should be empty for backward compat, got %d", len(cfg.Agents.List))
+	if len(cfg.Agents.Agents) != 0 {
+		t.Errorf("agents map should be empty when no agents defined, got %d", len(cfg.Agents.Agents))
 	}
 	if len(cfg.Bindings) != 0 {
 		t.Errorf("bindings should be empty, got %d", len(cfg.Bindings))
@@ -465,5 +466,179 @@ func TestDefaultConfig_WorkspacePath_WithPicoclawHome(t *testing.T) {
 
 	if cfg.Agents.Defaults.Workspace != want {
 		t.Errorf("Workspace path with PICOCLAW_HOME = %q, want %q", cfg.Agents.Defaults.Workspace, want)
+	}
+}
+
+// TestGetAgentByID_Exists verifies that GetAgentByID returns the correct agent
+func TestGetAgentByID_Exists(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.Agents = map[string]AgentConfig{
+		"agent1": {Name: "Test Agent 1"},
+		"agent2": {Name: "Test Agent 2"},
+	}
+
+	agent := cfg.GetAgentByID("agent1")
+	if agent == nil {
+		t.Fatal("GetAgentByID should return agent1")
+	}
+	if agent.ID != "agent1" || agent.Name != "Test Agent 1" {
+		t.Errorf("GetAgentByID returned wrong agent: %+v", agent)
+	}
+}
+
+// TestGetAgentByID_NotFound verifies that GetAgentByID returns nil for non-existent agent
+func TestGetAgentByID_NotFound(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.Agents = map[string]AgentConfig{
+		"agent1": {Name: "Test Agent 1"},
+	}
+
+	agent := cfg.GetAgentByID("nonexistent")
+	if agent != nil {
+		t.Errorf("GetAgentByID should return nil for non-existent agent, got: %+v", agent)
+	}
+}
+
+// TestGetMergedAgentDefaults_MergesWorkspace verifies workspace override
+func TestGetMergedAgentDefaults_MergesWorkspace(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.Defaults.Workspace = "/default/workspace"
+	cfg.Agents.Agents = map[string]AgentConfig{
+		"custom": {Workspace: "/custom/workspace"},
+	}
+
+	merged, err := cfg.GetMergedAgentDefaults("custom")
+	if err != nil {
+		t.Fatalf("GetMergedAgentDefaults error: %v", err)
+	}
+	if merged.Workspace != "/custom/workspace" {
+		t.Errorf("Workspace = %q, want %q", merged.Workspace, "/custom/workspace")
+	}
+}
+
+// TestGetMergedAgentDefaults_MergesModel verifies model override
+func TestGetMergedAgentDefaults_MergesModel(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.Defaults.ModelName = "gpt-4"
+	cfg.Agents.Agents = map[string]AgentConfig{
+		"claude": {Model: &AgentModelConfig{Primary: "claude-3"}},
+	}
+
+	merged, err := cfg.GetMergedAgentDefaults("claude")
+	if err != nil {
+		t.Fatalf("GetMergedAgentDefaults error: %v", err)
+	}
+	if merged.ModelName != "claude-3" {
+		t.Errorf("ModelName = %q, want %q", merged.ModelName, "claude-3")
+	}
+}
+
+// TestGetMergedAgentDefaults_MergesFallbacks verifies fallbacks override
+func TestGetMergedAgentDefaults_MergesFallbacks(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.Defaults.ModelFallbacks = []string{"fallback1"}
+	cfg.Agents.Agents = map[string]AgentConfig{
+		"multi": {Model: &AgentModelConfig{Primary: "model-1", Fallbacks: []string{"fb1", "fb2"}}},
+	}
+
+	merged, err := cfg.GetMergedAgentDefaults("multi")
+	if err != nil {
+		t.Fatalf("GetMergedAgentDefaults error: %v", err)
+	}
+	if len(merged.ModelFallbacks) != 2 || merged.ModelFallbacks[0] != "fb1" {
+		t.Errorf("ModelFallbacks = %v, want [fb1 fb2]", merged.ModelFallbacks)
+	}
+}
+
+// TestGetMergedAgentDefaults_KeepsDefaultsForEmptyAgent verifies defaults are kept when agent has no overrides
+func TestGetMergedAgentDefaults_KeepsDefaultsForEmptyAgent(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.Defaults.Workspace = "/default"
+	cfg.Agents.Defaults.ModelName = "gpt-4"
+	cfg.Agents.Defaults.MaxTokens = 8192
+	cfg.Agents.Agents = map[string]AgentConfig{
+		"empty": {},
+	}
+
+	merged, err := cfg.GetMergedAgentDefaults("empty")
+	if err != nil {
+		t.Fatalf("GetMergedAgentDefaults error: %v", err)
+	}
+	if merged.Workspace != "/default" {
+		t.Errorf("Workspace = %q, want %q", merged.Workspace, "/default")
+	}
+	if merged.ModelName != "gpt-4" {
+		t.Errorf("ModelName = %q, want %q", merged.ModelName, "gpt-4")
+	}
+	if merged.MaxTokens != 8192 {
+		t.Errorf("MaxTokens = %d, want %d", merged.MaxTokens, 8192)
+	}
+}
+
+// TestGetMergedAgentDefaults_NotFound verifies error for non-existent agent
+func TestGetMergedAgentDefaults_NotFound(t *testing.T) {
+	cfg := DefaultConfig()
+
+	_, err := cfg.GetMergedAgentDefaults("nonexistent")
+	if err == nil {
+		t.Fatal("GetMergedAgentDefaults should return error for non-existent agent")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("Error message should contain 'not found', got: %v", err)
+	}
+}
+
+// TestWorkspacePathForAgent verifies workspace path resolution for agents
+func TestWorkspacePathForAgent(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.Defaults.Workspace = "/default/workspace"
+	cfg.Agents.Agents = map[string]AgentConfig{
+		"custom": {Workspace: "~/custom"},
+	}
+
+	path, err := cfg.WorkspacePathForAgent("custom")
+	if err != nil {
+		t.Fatalf("WorkspacePathForAgent error: %v", err)
+	}
+	// Should expand ~ to home directory
+	if !strings.HasSuffix(path, "/custom") {
+		t.Errorf("WorkspacePathForAgent = %q, should end with '/custom'", path)
+	}
+}
+
+// TestWorkspacePathForAgent_NotFound verifies error for non-existent agent
+func TestWorkspacePathForAgent_NotFound(t *testing.T) {
+	cfg := DefaultConfig()
+
+	_, err := cfg.WorkspacePathForAgent("nonexistent")
+	if err == nil {
+		t.Fatal("WorkspacePathForAgent should return error for non-existent agent")
+	}
+}
+
+// TestGetMergedAgentDefaults_PartialOverrides verifies partial merging when agent has only workspace override
+func TestGetMergedAgentDefaults_PartialOverrides(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.Defaults.Workspace = "/default/workspace"
+	cfg.Agents.Defaults.ModelName = "gpt-4"
+	cfg.Agents.Defaults.MaxTokens = 8192
+	cfg.Agents.Agents = map[string]AgentConfig{
+		"partial": {Workspace: "/custom/workspace"},
+	}
+
+	merged, err := cfg.GetMergedAgentDefaults("partial")
+	if err != nil {
+		t.Fatalf("GetMergedAgentDefaults error: %v", err)
+	}
+	// Should override workspace
+	if merged.Workspace != "/custom/workspace" {
+		t.Errorf("Workspace = %q, want %q", merged.Workspace, "/custom/workspace")
+	}
+	// Should keep defaults for other fields
+	if merged.ModelName != "gpt-4" {
+		t.Errorf("ModelName = %q, want %q", merged.ModelName, "gpt-4")
+	}
+	if merged.MaxTokens != 8192 {
+		t.Errorf("MaxTokens = %d, want %d", merged.MaxTokens, 8192)
 	}
 }

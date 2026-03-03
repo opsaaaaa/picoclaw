@@ -511,9 +511,9 @@ func (c *OpenClawConfig) ConvertToPicoClaw(sourceHome string) (*PicoClawConfig, 
 
 	cfg.Channels = c.convertChannels(&warnings)
 
-	agentList := c.convertAgents(&warnings)
-	if len(agentList) > 0 {
-		cfg.Agents.List = agentList
+	agentMap := c.convertAgents(&warnings)
+	if len(agentMap) > 0 {
+		cfg.Agents.Agents = agentMap
 	}
 
 	if c.HasSkills() {
@@ -568,8 +568,8 @@ type PicoClawConfig struct {
 }
 
 type AgentsConfig struct {
-	Defaults AgentDefaults `json:"defaults"`
-	List     []AgentConfig `json:"list,omitempty"`
+	Defaults AgentDefaults          `json:"defaults"`
+	Agents   map[string]AgentConfig `json:"agents,omitempty"`
 }
 
 type AgentDefaults struct {
@@ -588,7 +588,6 @@ type AgentDefaults struct {
 
 type AgentConfig struct {
 	ID        string            `json:"id"`
-	Default   bool              `json:"default,omitempty"`
 	Name      string            `json:"name,omitempty"`
 	Workspace string            `json:"workspace,omitempty"`
 	Model     *AgentModelConfig `json:"model,omitempty"`
@@ -887,8 +886,8 @@ func (c *OpenClawConfig) convertChannels(warnings *[]string) ChannelsConfig {
 	return channels
 }
 
-func (c *OpenClawConfig) convertAgents(warnings *[]string) []AgentConfig {
-	var agents []AgentConfig
+func (c *OpenClawConfig) convertAgents(warnings *[]string) map[string]AgentConfig {
+	agents := make(map[string]AgentConfig)
 
 	if c.Agents == nil {
 		return agents
@@ -906,9 +905,8 @@ func (c *OpenClawConfig) convertAgents(warnings *[]string) []AgentConfig {
 		}
 
 		agentCfg := AgentConfig{
-			ID:      agentID,
-			Name:    agentName,
-			Default: len(agents) == 0,
+			ID:   agentID,
+			Name: agentName,
 		}
 
 		if entry.Workspace != nil {
@@ -929,7 +927,7 @@ func (c *OpenClawConfig) convertAgents(warnings *[]string) []AgentConfig {
 			agentCfg.Skills = entry.Skills
 		}
 
-		agents = append(agents, agentCfg)
+		agents[agentID] = agentCfg
 	}
 
 	return agents
@@ -957,21 +955,22 @@ func (c *PicoClawConfig) ToStandardConfig() *config.Config {
 	cfg.Gateway = c.Gateway.ToStandardGateway()
 	cfg.Tools = c.Tools.ToStandardTools()
 
-	cfg.Agents.List = make([]config.AgentConfig, len(c.Agents.List))
-	for i, a := range c.Agents.List {
-		cfg.Agents.List[i] = config.AgentConfig{
-			ID:        a.ID,
-			Default:   a.Default,
+	// Convert agents map
+	cfg.Agents.Agents = make(map[string]config.AgentConfig)
+	for id, a := range c.Agents.Agents {
+		agentCfg := config.AgentConfig{
+			ID:        id,
 			Name:      a.Name,
 			Workspace: a.Workspace,
 			Skills:    a.Skills,
 		}
 		if a.Model != nil {
-			cfg.Agents.List[i].Model = &config.AgentModelConfig{
+			agentCfg.Model = &config.AgentModelConfig{
 				Primary:   a.Model.Primary,
 				Fallbacks: a.Model.Fallbacks,
 			}
 		}
+		cfg.Agents.Agents[id] = agentCfg
 	}
 
 	return cfg

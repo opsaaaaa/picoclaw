@@ -18,7 +18,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-func agentCmd(message, sessionKey, model string, debug bool) error {
+func agentCmd(message, sessionKey, model, agentID string, debug bool) error {
 	if sessionKey == "" {
 		sessionKey = "cli:default"
 	}
@@ -33,23 +33,42 @@ func agentCmd(message, sessionKey, model string, debug bool) error {
 		return fmt.Errorf("error loading config: %w", err)
 	}
 
-	if model != "" {
-		cfg.Agents.Defaults.ModelName = model
+	// Determine which defaults to use - original or merged from named agent
+	defaults := cfg.Agents.Defaults
+	if agentID != "" {
+		mergedDefaults, err := cfg.GetMergedAgentDefaults(agentID)
+		if err != nil {
+			return fmt.Errorf("error getting agent config: %w", err)
+		}
+		defaults = mergedDefaults
+		if debug {
+			fmt.Printf("Using agent: %s\n", agentID)
+		}
 	}
 
-	provider, modelID, err := providers.CreateProvider(cfg)
+	// Apply CLI model override
+	if model != "" {
+		defaults.ModelName = model
+	}
+
+	// Create a local config copy with the effective defaults for provider creation
+	effectiveCfg := *cfg
+	effectiveCfg.Agents.Defaults = defaults
+
+	provider, modelID, err := providers.CreateProvider(&effectiveCfg)
 	if err != nil {
 		return fmt.Errorf("error creating provider: %w", err)
 	}
 
 	// Use the resolved model ID from provider creation
 	if modelID != "" {
-		cfg.Agents.Defaults.ModelName = modelID
+		defaults.ModelName = modelID
+		effectiveCfg.Agents.Defaults.ModelName = modelID
 	}
 
 	msgBus := bus.NewMessageBus()
 	defer msgBus.Close()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	agentLoop := agent.NewAgentLoop(&effectiveCfg, msgBus, provider)
 
 	// Print agent startup info (only for interactive mode)
 	startupInfo := agentLoop.GetStartupInfo()

@@ -173,7 +173,7 @@ func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentD
 	if agentCfg != nil && strings.TrimSpace(agentCfg.Workspace) != "" {
 		return expandHome(strings.TrimSpace(agentCfg.Workspace))
 	}
-	if agentCfg == nil || agentCfg.Default || agentCfg.ID == "" || routing.NormalizeAgentID(agentCfg.ID) == "main" {
+	if agentCfg == nil || agentCfg.ID == "" || routing.NormalizeAgentID(agentCfg.ID) == routing.DefaultAgentID {
 		return expandHome(defaults.Workspace)
 	}
 	home, _ := os.UserHomeDir()

@@ -6,14 +6,14 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
-func testConfig(agents []config.AgentConfig, bindings []config.AgentBinding) *config.Config {
+func testConfig(agents map[string]config.AgentConfig, bindings []config.AgentBinding) *config.Config {
 	return &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace: "/tmp/picoclaw-test",
 				Model:     "gpt-4",
 			},
-			List: agents,
+			Agents: agents,
 		},
 		Bindings: bindings,
 		Session: config.SessionConfig{
@@ -40,9 +40,9 @@ func TestResolveRoute_DefaultAgent_NoBindings(t *testing.T) {
 }
 
 func TestResolveRoute_PeerBinding(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "sales", Default: true},
-		{ID: "support"},
+	agents := map[string]config.AgentConfig{
+		"sales":   {},
+		"support": {},
 	}
 	bindings := []config.AgentBinding{
 		{
@@ -71,9 +71,9 @@ func TestResolveRoute_PeerBinding(t *testing.T) {
 }
 
 func TestResolveRoute_GuildBinding(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "general", Default: true},
-		{ID: "gaming"},
+	agents := map[string]config.AgentConfig{
+		"general": {},
+		"gaming":  {},
 	}
 	bindings := []config.AgentBinding{
 		{
@@ -103,9 +103,9 @@ func TestResolveRoute_GuildBinding(t *testing.T) {
 }
 
 func TestResolveRoute_TeamBinding(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "general", Default: true},
-		{ID: "work"},
+	agents := map[string]config.AgentConfig{
+		"general": {},
+		"work":    {},
 	}
 	bindings := []config.AgentBinding{
 		{
@@ -135,9 +135,9 @@ func TestResolveRoute_TeamBinding(t *testing.T) {
 }
 
 func TestResolveRoute_AccountBinding(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "default-agent", Default: true},
-		{ID: "premium"},
+	agents := map[string]config.AgentConfig{
+		"default-agent": {},
+		"premium":       {},
 	}
 	bindings := []config.AgentBinding{
 		{
@@ -166,9 +166,9 @@ func TestResolveRoute_AccountBinding(t *testing.T) {
 }
 
 func TestResolveRoute_ChannelWildcard(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "main", Default: true},
-		{ID: "telegram-bot"},
+	agents := map[string]config.AgentConfig{
+		"main":         {},
+		"telegram-bot": {},
 	}
 	bindings := []config.AgentBinding{
 		{
@@ -196,10 +196,10 @@ func TestResolveRoute_ChannelWildcard(t *testing.T) {
 }
 
 func TestResolveRoute_PriorityOrder_PeerBeatsGuild(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "general", Default: true},
-		{ID: "vip"},
-		{ID: "gaming"},
+	agents := map[string]config.AgentConfig{
+		"general": {},
+		"vip":     {},
+		"gaming":  {},
 	}
 	bindings := []config.AgentBinding{
 		{
@@ -237,8 +237,8 @@ func TestResolveRoute_PriorityOrder_PeerBeatsGuild(t *testing.T) {
 }
 
 func TestResolveRoute_InvalidAgentFallsToDefault(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "main", Default: true},
+	agents := map[string]config.AgentConfig{
+		"main": {},
 	}
 	bindings := []config.AgentBinding{
 		{
@@ -262,36 +262,49 @@ func TestResolveRoute_InvalidAgentFallsToDefault(t *testing.T) {
 }
 
 func TestResolveRoute_DefaultAgentSelection(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "alpha"},
-		{ID: "beta", Default: true},
-		{ID: "gamma"},
+	agents := map[string]config.AgentConfig{
+		"alpha": {},
+		"beta":  {},
+		"gamma": {},
 	}
 	cfg := testConfig(agents, nil)
 	r := NewRouteResolver(cfg)
+
+	route := r.ResolveRoute(RouteInput{
+		Channel: "cli",
+	})
+
+	// With new behavior, agents.defaults is always the default
+	if route.AgentID != DefaultAgentID {
+		t.Errorf("AgentID = %q, want %q (agents.defaults is always default)", route.AgentID, DefaultAgentID)
+	}
+}
+
+func TestResolveRoute_UsesNamedAgentWithFlag(t *testing.T) {
+	agents := map[string]config.AgentConfig{
+		"alpha": {},
+		"beta":  {},
+	}
+	cfg := testConfig(agents, nil)
+	r := NewRouteResolver(cfg)
+
+	// Use a binding to route to a named agent
+	binding := []config.AgentBinding{
+		{
+			AgentID: "beta",
+			Match: config.BindingMatch{
+				Channel:   "cli",
+				AccountID: "*",
+			},
+		},
+	}
+	cfg.Bindings = binding
 
 	route := r.ResolveRoute(RouteInput{
 		Channel: "cli",
 	})
 
 	if route.AgentID != "beta" {
-		t.Errorf("AgentID = %q, want 'beta' (marked as default)", route.AgentID)
-	}
-}
-
-func TestResolveRoute_NoDefaultUsesFirst(t *testing.T) {
-	agents := []config.AgentConfig{
-		{ID: "alpha"},
-		{ID: "beta"},
-	}
-	cfg := testConfig(agents, nil)
-	r := NewRouteResolver(cfg)
-
-	route := r.ResolveRoute(RouteInput{
-		Channel: "cli",
-	})
-
-	if route.AgentID != "alpha" {
-		t.Errorf("AgentID = %q, want 'alpha' (first in list)", route.AgentID)
+		t.Errorf("AgentID = %q, want 'beta' (matched by binding)", route.AgentID)
 	}
 }

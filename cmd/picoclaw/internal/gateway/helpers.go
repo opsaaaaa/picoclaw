@@ -38,7 +38,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
-func gatewayCmd(debug bool) error {
+func gatewayCmd(debug bool, agentID string) error {
 	if debug {
 		logger.SetLevel(logger.DEBUG)
 		fmt.Println("🔍 Debug mode enabled")
@@ -49,18 +49,36 @@ func gatewayCmd(debug bool) error {
 		return fmt.Errorf("error loading config: %w", err)
 	}
 
-	provider, modelID, err := providers.CreateProvider(cfg)
+	// Determine which defaults to use - original or merged from named agent
+	defaults := cfg.Agents.Defaults
+	if agentID != "" {
+		mergedDefaults, err := cfg.GetMergedAgentDefaults(agentID)
+		if err != nil {
+			return fmt.Errorf("error getting agent config: %w", err)
+		}
+		defaults = mergedDefaults
+		if debug {
+			fmt.Printf("Using agent: %s\n", agentID)
+		}
+	}
+
+	// Create a local config copy with the effective defaults for provider creation
+	effectiveCfg := *cfg
+	effectiveCfg.Agents.Defaults = defaults
+
+	provider, modelID, err := providers.CreateProvider(&effectiveCfg)
 	if err != nil {
 		return fmt.Errorf("error creating provider: %w", err)
 	}
 
 	// Use the resolved model ID from provider creation
 	if modelID != "" {
-		cfg.Agents.Defaults.ModelName = modelID
+		defaults.ModelName = modelID
+		effectiveCfg.Agents.Defaults.ModelName = modelID
 	}
 
 	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	agentLoop := agent.NewAgentLoop(&effectiveCfg, msgBus, provider)
 
 	// Print agent startup info
 	fmt.Println("\n📦 Agent Status:")

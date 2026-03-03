@@ -248,13 +248,19 @@ func TestConvertToPicoClaw(t *testing.T) {
 		t.Errorf("expected workspace '~/.picoclaw/workspace', got '%s'", picoCfg.Agents.Defaults.Workspace)
 	}
 
-	if len(picoCfg.Agents.List) != 2 {
-		t.Errorf("expected 2 agents, got %d", len(picoCfg.Agents.List))
+	if len(picoCfg.Agents.Agents) != 2 {
+		t.Errorf("expected 2 agents, got %d", len(picoCfg.Agents.Agents))
 	}
-	if picoCfg.Agents.List[0].ID != "main" {
-		t.Errorf("expected first agent id 'main', got '%s'", picoCfg.Agents.List[0].ID)
+	mainAgent, ok := picoCfg.Agents.Agents["main"]
+	if !ok {
+		t.Errorf("expected agent 'main' to exist")
+	} else if mainAgent.ID != "main" {
+		t.Errorf("expected agent id 'main', got '%s'", mainAgent.ID)
 	}
-	if picoCfg.Agents.List[1].Skills == nil || len(picoCfg.Agents.List[1].Skills) != 2 {
+	assistantAgent, ok := picoCfg.Agents.Agents["assistant"]
+	if !ok {
+		t.Errorf("expected agent 'assistant' to exist")
+	} else if assistantAgent.Skills == nil || len(assistantAgent.Skills) != 2 {
 		t.Errorf("expected 2 skills for assistant agent")
 	}
 
@@ -533,11 +539,10 @@ func TestToStandardConfig(t *testing.T) {
 				ModelName: "claude-sonnet-4-20250514",
 				Workspace: "~/.picoclaw/workspace",
 			},
-			List: []AgentConfig{
-				{
-					ID:      "main",
-					Name:    "Main Agent",
-					Default: true,
+			Agents: map[string]AgentConfig{
+				"main": {
+					ID:   "main",
+					Name: "Main Agent",
 				},
 			},
 		},
@@ -577,11 +582,14 @@ func TestToStandardConfig(t *testing.T) {
 		t.Errorf("expected workspace '~/.picoclaw/workspace', got '%s'", stdCfg.Agents.Defaults.Workspace)
 	}
 
-	if len(stdCfg.Agents.List) != 1 {
-		t.Errorf("expected 1 agent, got %d", len(stdCfg.Agents.List))
+	if len(stdCfg.Agents.Agents) != 1 {
+		t.Errorf("expected 1 agent, got %d", len(stdCfg.Agents.Agents))
 	}
-	if stdCfg.Agents.List[0].ID != "main" {
-		t.Errorf("expected agent id 'main', got '%s'", stdCfg.Agents.List[0].ID)
+	mainAgent, ok := stdCfg.Agents.Agents["main"]
+	if !ok {
+		t.Errorf("expected agent 'main' to exist")
+	} else if mainAgent.ID != "main" {
+		t.Errorf("expected agent id 'main', got '%s'", mainAgent.ID)
 	}
 
 	foundModel := false

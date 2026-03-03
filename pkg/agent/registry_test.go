@@ -24,7 +24,7 @@ func (m *mockRegistryProvider) GetDefaultModel() string {
 	return "mock-model"
 }
 
-func testCfg(agents []config.AgentConfig) *config.Config {
+func testCfg(agents map[string]config.AgentConfig) *config.Config {
 	return &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -33,7 +33,7 @@ func testCfg(agents []config.AgentConfig) *config.Config {
 				MaxTokens:         8192,
 				MaxToolIterations: 10,
 			},
-			List: agents,
+			Agents: agents,
 		},
 	}
 }
@@ -43,23 +43,15 @@ func TestNewAgentRegistry_ImplicitMain(t *testing.T) {
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
 	ids := registry.ListAgentIDs()
-	if len(ids) != 1 || ids[0] != "main" {
-		t.Errorf("expected implicit main agent, got %v", ids)
-	}
-
-	agent, ok := registry.GetAgent("main")
-	if !ok || agent == nil {
-		t.Fatal("expected to find 'main' agent")
-	}
-	if agent.ID != "main" {
-		t.Errorf("agent.ID = %q, want 'main'", agent.ID)
+	if len(ids) != 0 {
+		t.Errorf("expected no agents when none configured, got %v", ids)
 	}
 }
 
 func TestNewAgentRegistry_ExplicitAgents(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
-		{ID: "sales", Default: true, Name: "Sales Bot"},
-		{ID: "support", Name: "Support Bot"},
+	cfg := testCfg(map[string]config.AgentConfig{
+		"sales":   {Name: "Sales Bot"},
+		"support": {Name: "Support Bot"},
 	})
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
@@ -83,8 +75,8 @@ func TestNewAgentRegistry_ExplicitAgents(t *testing.T) {
 }
 
 func TestAgentRegistry_GetAgent_Normalize(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
-		{ID: "my-agent", Default: true},
+	cfg := testCfg(map[string]config.AgentConfig{
+		"my-agent": {},
 	})
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
@@ -98,13 +90,13 @@ func TestAgentRegistry_GetAgent_Normalize(t *testing.T) {
 }
 
 func TestAgentRegistry_GetDefaultAgent(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
-		{ID: "alpha"},
-		{ID: "beta", Default: true},
+	cfg := testCfg(map[string]config.AgentConfig{
+		"alpha": {},
+		"beta":  {},
 	})
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
-	// GetDefaultAgent first checks for "main", then returns any
+	// GetDefaultAgent returns any available agent when no main
 	agent := registry.GetDefaultAgent()
 	if agent == nil {
 		t.Fatal("expected a default agent")
@@ -112,17 +104,15 @@ func TestAgentRegistry_GetDefaultAgent(t *testing.T) {
 }
 
 func TestAgentRegistry_CanSpawnSubagent(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
-		{
-			ID:      "parent",
-			Default: true,
+	cfg := testCfg(map[string]config.AgentConfig{
+		"parent": {
 			Subagents: &config.SubagentsConfig{
 				AllowAgents: []string{"child1", "child2"},
 			},
 		},
-		{ID: "child1"},
-		{ID: "child2"},
-		{ID: "restricted"},
+		"child1":     {},
+		"child2":     {},
+		"restricted": {},
 	})
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
@@ -141,15 +131,13 @@ func TestAgentRegistry_CanSpawnSubagent(t *testing.T) {
 }
 
 func TestAgentRegistry_CanSpawnSubagent_Wildcard(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
-		{
-			ID:      "admin",
-			Default: true,
+	cfg := testCfg(map[string]config.AgentConfig{
+		"admin": {
 			Subagents: &config.SubagentsConfig{
 				AllowAgents: []string{"*"},
 			},
 		},
-		{ID: "any-agent"},
+		"any-agent": {},
 	})
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
@@ -163,8 +151,8 @@ func TestAgentRegistry_CanSpawnSubagent_Wildcard(t *testing.T) {
 
 func TestAgentInstance_Model(t *testing.T) {
 	model := &config.AgentModelConfig{Primary: "claude-opus"}
-	cfg := testCfg([]config.AgentConfig{
-		{ID: "custom", Default: true, Model: model},
+	cfg := testCfg(map[string]config.AgentConfig{
+		"custom": {Model: model},
 	})
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
@@ -175,8 +163,8 @@ func TestAgentInstance_Model(t *testing.T) {
 }
 
 func TestAgentInstance_FallbackInheritance(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
-		{ID: "inherit", Default: true},
+	cfg := testCfg(map[string]config.AgentConfig{
+		"inherit": {},
 	})
 	cfg.Agents.Defaults.ModelFallbacks = []string{"openai/gpt-4o-mini", "anthropic/haiku"}
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
@@ -192,8 +180,8 @@ func TestAgentInstance_FallbackExplicitEmpty(t *testing.T) {
 		Primary:   "gpt-4",
 		Fallbacks: []string{}, // explicitly empty = disable
 	}
-	cfg := testCfg([]config.AgentConfig{
-		{ID: "no-fallback", Default: true, Model: model},
+	cfg := testCfg(map[string]config.AgentConfig{
+		"no-fallback": {Model: model},
 	})
 	cfg.Agents.Defaults.ModelFallbacks = []string{"should-not-inherit"}
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
