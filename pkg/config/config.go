@@ -237,6 +237,8 @@ type PlaceholderConfig struct {
 
 type WhatsAppConfig struct {
 	Enabled            bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_WHATSAPP_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"          env:"PICOCLAW_CHANNELS_WHATSAPP_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"       env:"PICOCLAW_CHANNELS_WHATSAPP_BACKOFF_FACTOR"`
 	BridgeURL          string              `json:"bridge_url"           env:"PICOCLAW_CHANNELS_WHATSAPP_BRIDGE_URL"`
 	UseNative          bool                `json:"use_native"           env:"PICOCLAW_CHANNELS_WHATSAPP_USE_NATIVE"`
 	SessionStorePath   string              `json:"session_store_path"   env:"PICOCLAW_CHANNELS_WHATSAPP_SESSION_STORE_PATH"`
@@ -246,6 +248,8 @@ type WhatsAppConfig struct {
 
 type TelegramConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_TELEGRAM_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_TELEGRAM_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_TELEGRAM_BACKOFF_FACTOR"`
 	Token              string              `json:"token"                   env:"PICOCLAW_CHANNELS_TELEGRAM_TOKEN"`
 	BaseURL            string              `json:"base_url"                env:"PICOCLAW_CHANNELS_TELEGRAM_BASE_URL"`
 	Proxy              string              `json:"proxy"                   env:"PICOCLAW_CHANNELS_TELEGRAM_PROXY"`
@@ -258,6 +262,8 @@ type TelegramConfig struct {
 
 type FeishuConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_FEISHU_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_FEISHU_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_FEISHU_BACKOFF_FACTOR"`
 	AppID              string              `json:"app_id"                  env:"PICOCLAW_CHANNELS_FEISHU_APP_ID"`
 	AppSecret          string              `json:"app_secret"              env:"PICOCLAW_CHANNELS_FEISHU_APP_SECRET"`
 	EncryptKey         string              `json:"encrypt_key"             env:"PICOCLAW_CHANNELS_FEISHU_ENCRYPT_KEY"`
@@ -270,6 +276,8 @@ type FeishuConfig struct {
 
 type DiscordConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_DISCORD_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_DISCORD_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_DISCORD_BACKOFF_FACTOR"`
 	Token              string              `json:"token"                   env:"PICOCLAW_CHANNELS_DISCORD_TOKEN"`
 	Proxy              string              `json:"proxy"                   env:"PICOCLAW_CHANNELS_DISCORD_PROXY"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"PICOCLAW_CHANNELS_DISCORD_ALLOW_FROM"`
@@ -282,6 +290,8 @@ type DiscordConfig struct {
 
 type MaixCamConfig struct {
 	Enabled            bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_MAIXCAM_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"          env:"PICOCLAW_CHANNELS_MAIXCAM_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"       env:"PICOCLAW_CHANNELS_MAIXCAM_BACKOFF_FACTOR"`
 	Host               string              `json:"host"                 env:"PICOCLAW_CHANNELS_MAIXCAM_HOST"`
 	Port               int                 `json:"port"                 env:"PICOCLAW_CHANNELS_MAIXCAM_PORT"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from"           env:"PICOCLAW_CHANNELS_MAIXCAM_ALLOW_FROM"`
@@ -290,6 +300,8 @@ type MaixCamConfig struct {
 
 type QQConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_QQ_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_QQ_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_QQ_BACKOFF_FACTOR"`
 	AppID              string              `json:"app_id"                  env:"PICOCLAW_CHANNELS_QQ_APP_ID"`
 	AppSecret          string              `json:"app_secret"              env:"PICOCLAW_CHANNELS_QQ_APP_SECRET"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"PICOCLAW_CHANNELS_QQ_ALLOW_FROM"`
@@ -299,6 +311,8 @@ type QQConfig struct {
 
 type DingTalkConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_DINGTALK_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_DINGTALK_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_DINGTALK_BACKOFF_FACTOR"`
 	ClientID           string              `json:"client_id"               env:"PICOCLAW_CHANNELS_DINGTALK_CLIENT_ID"`
 	ClientSecret       string              `json:"client_secret"           env:"PICOCLAW_CHANNELS_DINGTALK_CLIENT_SECRET"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"PICOCLAW_CHANNELS_DINGTALK_ALLOW_FROM"`
@@ -308,6 +322,8 @@ type DingTalkConfig struct {
 
 type SlackConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_SLACK_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_SLACK_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_SLACK_BACKOFF_FACTOR"`
 	BotToken           string              `json:"bot_token"               env:"PICOCLAW_CHANNELS_SLACK_BOT_TOKEN"`
 	AppToken           string              `json:"app_token"               env:"PICOCLAW_CHANNELS_SLACK_APP_TOKEN"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"PICOCLAW_CHANNELS_SLACK_ALLOW_FROM"`
@@ -319,6 +335,8 @@ type SlackConfig struct {
 
 type LINEConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_LINE_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_LINE_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_LINE_BACKOFF_FACTOR"`
 	ChannelSecret      string              `json:"channel_secret"          env:"PICOCLAW_CHANNELS_LINE_CHANNEL_SECRET"`
 	ChannelAccessToken string              `json:"channel_access_token"    env:"PICOCLAW_CHANNELS_LINE_CHANNEL_ACCESS_TOKEN"`
 	WebhookHost        string              `json:"webhook_host"            env:"PICOCLAW_CHANNELS_LINE_WEBHOOK_HOST"`
@@ -333,6 +351,8 @@ type LINEConfig struct {
 
 type OneBotConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_ONEBOT_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_ONEBOT_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_ONEBOT_BACKOFF_FACTOR"`
 	WSUrl              string              `json:"ws_url"                  env:"PICOCLAW_CHANNELS_ONEBOT_WS_URL"`
 	AccessToken        string              `json:"access_token"            env:"PICOCLAW_CHANNELS_ONEBOT_ACCESS_TOKEN"`
 	ReconnectInterval  int                 `json:"reconnect_interval"      env:"PICOCLAW_CHANNELS_ONEBOT_RECONNECT_INTERVAL"`
@@ -346,6 +366,8 @@ type OneBotConfig struct {
 
 type WeComConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_WECOM_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_WECOM_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_WECOM_BACKOFF_FACTOR"`
 	Token              string              `json:"token"                   env:"PICOCLAW_CHANNELS_WECOM_TOKEN"`
 	EncodingAESKey     string              `json:"encoding_aes_key"        env:"PICOCLAW_CHANNELS_WECOM_ENCODING_AES_KEY"`
 	WebhookURL         string              `json:"webhook_url"             env:"PICOCLAW_CHANNELS_WECOM_WEBHOOK_URL"`
@@ -360,6 +382,8 @@ type WeComConfig struct {
 
 type WeComAppConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_WECOM_APP_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"             env:"PICOCLAW_CHANNELS_WECOM_APP_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"          env:"PICOCLAW_CHANNELS_WECOM_APP_BACKOFF_FACTOR"`
 	CorpID             string              `json:"corp_id"                 env:"PICOCLAW_CHANNELS_WECOM_APP_CORP_ID"`
 	CorpSecret         string              `json:"corp_secret"             env:"PICOCLAW_CHANNELS_WECOM_APP_CORP_SECRET"`
 	AgentID            int64               `json:"agent_id"                env:"PICOCLAW_CHANNELS_WECOM_APP_AGENT_ID"`
@@ -376,6 +400,8 @@ type WeComAppConfig struct {
 
 type WeComAIBotConfig struct {
 	Enabled            bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_WECOM_AIBOT_ENABLED"`
+	MaxRetries         int                 `json:"max_retries"          env:"PICOCLAW_CHANNELS_WECOM_AIBOT_MAX_RETRIES"`
+	BackoffFactor      float64             `json:"backoff_factor"       env:"PICOCLAW_CHANNELS_WECOM_AIBOT_BACKOFF_FACTOR"`
 	Token              string              `json:"token"                env:"PICOCLAW_CHANNELS_WECOM_AIBOT_TOKEN"`
 	EncodingAESKey     string              `json:"encoding_aes_key"     env:"PICOCLAW_CHANNELS_WECOM_AIBOT_ENCODING_AES_KEY"`
 	WebhookPath        string              `json:"webhook_path"         env:"PICOCLAW_CHANNELS_WECOM_AIBOT_WEBHOOK_PATH"`
@@ -388,6 +414,8 @@ type WeComAIBotConfig struct {
 
 type PicoConfig struct {
 	Enabled         bool                `json:"enabled"                     env:"PICOCLAW_CHANNELS_PICO_ENABLED"`
+	MaxRetries      int                 `json:"max_retries"                 env:"PICOCLAW_CHANNELS_PICO_MAX_RETRIES"`
+	BackoffFactor   float64             `json:"backoff_factor"              env:"PICOCLAW_CHANNELS_PICO_BACKOFF_FACTOR"`
 	Token           string              `json:"token"                       env:"PICOCLAW_CHANNELS_PICO_TOKEN"`
 	AllowTokenQuery bool                `json:"allow_token_query,omitempty"`
 	AllowOrigins    []string            `json:"allow_origins,omitempty"`

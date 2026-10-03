@@ -12,6 +12,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 // mockChannel is a test double that delegates Send to a configurable function.
@@ -858,5 +859,521 @@ func TestBuildMediaScope_WithMessageID(t *testing.T) {
 	expected := "discord:chat99:msg123"
 	if scope != expected {
 		t.Fatalf("expected %s, got %s", expected, scope)
+	}
+}
+
+// =============================================================================
+// Connection Retry Logic Tests
+// =============================================================================
+
+// mockConnectableChannel is a test double that can simulate connection failures
+// and successes for testing the retry logic in StartAll.
+type mockConnectableChannel struct {
+	BaseChannel
+	startAttempts atomic.Int32
+	maxFailures   int
+	startDelay    time.Duration
+	shouldFail    bool
+	lastError     error
+}
+
+func newMockConnectableChannel(maxFailures int) *mockConnectableChannel {
+	ch := &mockConnectableChannel{
+		maxFailures: maxFailures,
+		startDelay:  10 * time.Millisecond, // Fast for tests
+	}
+	ch.SetRunning(false)
+	return ch
+}
+
+func (m *mockConnectableChannel) Start(ctx context.Context) error {
+	attempt := int(m.startAttempts.Add(1))
+
+	if m.startDelay > 0 {
+		select {
+		case <-time.After(m.startDelay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	if m.shouldFail || attempt <= m.maxFailures {
+		m.lastError = fmt.Errorf("connection attempt %d failed", attempt)
+		return m.lastError
+	}
+
+	m.SetRunning(true)
+	return nil
+}
+
+func (m *mockConnectableChannel) Stop(ctx context.Context) error {
+	m.SetRunning(false)
+	return nil
+}
+
+func (m *mockConnectableChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	return nil
+}
+
+func (m *mockConnectableChannel) IsAllowed(senderID string) bool             { return true }
+func (m *mockConnectableChannel) IsAllowedSender(sender bus.SenderInfo) bool { return true }
+func (m *mockConnectableChannel) ReasoningChannelID() string                 { return "" }
+
+// newTestManagerWithConfig creates a Manager with a real config for testing retry logic.
+func newTestManagerWithConfig() *Manager {
+	cfg := config.DefaultConfig()
+	return &Manager{
+		channels:   make(map[string]Channel),
+		workers:    make(map[string]*channelWorker),
+		connStates: make(map[string]*channelConnectionState),
+		config:     cfg,
+		bus:        bus.NewMessageBus(), // Add a message bus to avoid nil pointer
+	}
+}
+
+// TestStartAll_SuccessFirstAttempt verifies channels connect on first try.
+func TestStartAll_SuccessFirstAttempt(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	// Create a channel that succeeds immediately (maxFailures = 0)
+	ch := newMockConnectableChannel(0)
+	m.channels["discord"] = ch
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := m.StartAll(ctx)
+	if err != nil {
+		t.Fatalf("StartAll failed: %v", err)
+	}
+
+	// Verify channel started
+	if !ch.IsRunning() {
+		t.Error("Channel should be running after successful StartAll")
+	}
+
+	// Verify worker was created
+	if _, ok := m.workers["discord"]; !ok {
+		t.Error("Worker should be created for started channel")
+	}
+
+	// Verify connection state
+	state := m.connStates["discord"]
+	if state == nil {
+		t.Fatal("Connection state should exist")
+	}
+	if !state.IsConnected() {
+		t.Error("Channel should be marked as connected")
+	}
+	if state.GetAttempts() != 1 {
+		t.Errorf("Expected 1 attempt, got %d", state.GetAttempts())
+	}
+}
+
+// TestStartAll_RetryThenSuccess verifies retry logic works - fails then succeeds.
+func TestStartAll_RetryThenSuccess(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	// Create a channel that fails 2 times then succeeds
+	ch := newMockConnectableChannel(2)
+	m.channels["discord"] = ch
+
+	// Override default backoff to be fast for testing
+	oldBaseBackoff := defaultBaseBackoffDelay
+	defaultBaseBackoffDelay = 50 * time.Millisecond
+	defer func() { defaultBaseBackoffDelay = oldBaseBackoff }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	err := m.StartAll(ctx)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("StartAll failed: %v", err)
+	}
+
+	// Verify channel eventually started
+	if !ch.IsRunning() {
+		t.Error("Channel should be running after retry success")
+	}
+
+	// Verify correct number of attempts
+	if ch.startAttempts.Load() != 3 {
+		t.Errorf("Expected 3 attempts (2 failures + 1 success), got %d", ch.startAttempts.Load())
+	}
+
+	// Verify backoff delays: 50ms + 100ms = 150ms minimum
+	if elapsed < 150*time.Millisecond {
+		t.Errorf("Expected at least 150ms for exponential backoff, got %v", elapsed)
+	}
+
+	// Verify state tracking
+	state := m.connStates["discord"]
+	if state.GetAttempts() != 3 {
+		t.Errorf("Expected 3 attempts in state, got %d", state.GetAttempts())
+	}
+	if !state.IsConnected() {
+		t.Error("Channel should be marked as connected")
+	}
+}
+
+// TestStartAll_MaxRetriesExhausted verifies channel stops after max retries.
+func TestStartAll_MaxRetriesExhausted(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	// Create a channel that always fails
+	ch := newMockConnectableChannel(100) // More than default max retries
+	ch.shouldFail = true
+	m.channels["discord"] = ch
+
+	// Set max retries to 3 for faster test
+	m.config.Channels.Discord.MaxRetries = 3
+
+	// Fast backoff for testing
+	oldBaseBackoff := defaultBaseBackoffDelay
+	defaultBaseBackoffDelay = 20 * time.Millisecond
+	defer func() { defaultBaseBackoffDelay = oldBaseBackoff }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := m.StartAll(ctx)
+	// StartAll should succeed even if some channels fail
+	if err != nil {
+		t.Fatalf("StartAll should not error when channel exhausts retries: %v", err)
+	}
+
+	// Verify channel was attempted max_retries times
+	if ch.startAttempts.Load() != 3 {
+		t.Errorf("Expected 3 attempts (max_retries), got %d", ch.startAttempts.Load())
+	}
+
+	// Verify channel is NOT running
+	if ch.IsRunning() {
+		t.Error("Channel should not be running after exhausting retries")
+	}
+
+	// Verify worker was NOT created
+	if _, ok := m.workers["discord"]; ok {
+		t.Error("Worker should NOT be created for failed channel")
+	}
+
+	// Verify state shows not connected but with max attempts
+	state := m.connStates["discord"]
+	if state.IsConnected() {
+		t.Error("Channel should not be marked as connected")
+	}
+	if state.GetAttempts() != 3 {
+		t.Errorf("Expected 3 attempts in state, got %d", state.GetAttempts())
+	}
+}
+
+// TestStartAll_MixedChannels verifies non-blocking behavior with mixed results.
+func TestStartAll_MixedChannels(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	// Channel 1: Connects immediately
+	ch1 := newMockConnectableChannel(0)
+	m.channels["telegram"] = ch1
+
+	// Channel 2: Fails 1 time then connects
+	ch2 := newMockConnectableChannel(1)
+	m.channels["discord"] = ch2
+
+	// Channel 3: Always fails (will exhaust retries)
+	ch3 := newMockConnectableChannel(100)
+	ch3.shouldFail = true
+	m.config.Channels.Slack.MaxRetries = 2
+	m.channels["slack"] = ch3
+
+	// Fast backoff for testing
+	oldBaseBackoff := defaultBaseBackoffDelay
+	defaultBaseBackoffDelay = 30 * time.Millisecond
+	defer func() { defaultBaseBackoffDelay = oldBaseBackoff }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := m.StartAll(ctx)
+	if err != nil {
+		t.Fatalf("StartAll failed: %v", err)
+	}
+
+	// Verify instant channel connected on first try
+	if !ch1.IsRunning() {
+		t.Error("Instant channel should be running")
+	}
+	if ch1.startAttempts.Load() != 1 {
+		t.Errorf("Instant channel: expected 1 attempt, got %d", ch1.startAttempts.Load())
+	}
+
+	// Verify retry channel connected on 2nd try
+	if !ch2.IsRunning() {
+		t.Error("Retry channel should be running")
+	}
+	if ch2.startAttempts.Load() != 2 {
+		t.Errorf("Retry channel: expected 2 attempts, got %d", ch2.startAttempts.Load())
+	}
+
+	// Verify failing channel exhausted retries
+	if ch3.IsRunning() {
+		t.Error("Failing channel should NOT be running")
+	}
+	if ch3.startAttempts.Load() != 2 {
+		t.Errorf("Failing channel: expected 2 attempts, got %d", ch3.startAttempts.Load())
+	}
+
+	// Verify workers created only for successful channels
+	if _, ok := m.workers["telegram"]; !ok {
+		t.Error("Worker should exist for instant channel")
+	}
+	if _, ok := m.workers["discord"]; !ok {
+		t.Error("Worker should exist for retry channel")
+	}
+	if _, ok := m.workers["slack"]; ok {
+		t.Error("Worker should NOT exist for failing channel")
+	}
+
+	// Verify GetConnectionStatus shows correct state
+	status := m.GetConnectionStatus()
+	channels := status["channels"].(map[string]any)
+
+	instantStatus := channels["telegram"].(map[string]any)
+	if !instantStatus["connected"].(bool) {
+		t.Error("Instant channel should show as connected")
+	}
+
+	retryStatus := channels["discord"].(map[string]any)
+	if !retryStatus["connected"].(bool) {
+		t.Error("Retry channel should show as connected")
+	}
+
+	failingStatus := channels["slack"].(map[string]any)
+	if failingStatus["connected"].(bool) {
+		t.Error("Failing channel should NOT show as connected")
+	}
+
+	// Verify summary counts
+	if status["connected"].(int) != 2 {
+		t.Errorf("Expected 2 connected, got %d", status["connected"].(int))
+	}
+	if status["failed"].(int) != 1 {
+		t.Errorf("Expected 1 failed, got %d", status["failed"].(int))
+	}
+}
+
+// TestStartAll_ContextCancellation verifies graceful shutdown on context cancel.
+func TestStartAll_ContextCancellation(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	// Create a channel that takes a while to fail
+	ch := newMockConnectableChannel(100)
+	ch.shouldFail = true
+	ch.startDelay = 500 * time.Millisecond
+	m.channels["discord"] = ch
+
+	// Fast backoff
+	oldBaseBackoff := defaultBaseBackoffDelay
+	defaultBaseBackoffDelay = 100 * time.Millisecond
+	defer func() { defaultBaseBackoffDelay = oldBaseBackoff }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel context after short delay (during first attempt)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+
+	err := m.StartAll(ctx)
+
+	// Should return context cancellation error
+	if err != context.Canceled && err != context.DeadlineExceeded {
+		t.Errorf("Expected context error, got: %v", err)
+	}
+}
+
+// TestBackoffCalculation verifies exponential backoff calculation.
+func TestBackoffCalculation(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	// Set custom backoff factor
+	m.config.Channels.Discord.BackoffFactor = 2.5
+
+	ch := newMockConnectableChannel(3)
+	m.channels["discord"] = ch
+
+	// Short delays for testing
+	oldBaseBackoff := defaultBaseBackoffDelay
+	defaultBaseBackoffDelay = 10 * time.Millisecond
+	defer func() { defaultBaseBackoffDelay = oldBaseBackoff }()
+
+	oldMaxBackoff := defaultMaxBackoffDelay
+	defaultMaxBackoffDelay = 100 * time.Millisecond
+	defer func() { defaultMaxBackoffDelay = oldMaxBackoff }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := m.StartAll(ctx)
+	if err != nil {
+		t.Fatalf("StartAll failed: %v", err)
+	}
+
+	state := m.connStates["discord"]
+	// With 3 failures then success (4 attempts total):
+	// backoff progression: 10ms -> 25ms -> 62.5ms -> 156.25ms (capped at 100ms)
+	// So final backoff should be 100ms (the cap)
+	backoff := state.GetBackoffDelay()
+	expectedBackoff := 100 * time.Millisecond // Capped at max
+	if backoff != expectedBackoff {
+		t.Errorf("Expected backoff %v, got %v", expectedBackoff, backoff)
+	}
+}
+
+// TestConnectionStateThreadSafety verifies concurrent access to connection state.
+// This test uses -race flag to detect data races.
+func TestConnectionStateThreadSafety(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	ch := newMockConnectableChannel(2)
+	m.channels["discord"] = ch
+
+	// Fast backoff
+	oldBaseBackoff := defaultBaseBackoffDelay
+	defaultBaseBackoffDelay = 20 * time.Millisecond
+	defer func() { defaultBaseBackoffDelay = oldBaseBackoff }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Start StartAll in background
+	var startErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		startErr = m.StartAll(ctx)
+	}()
+
+	// Concurrently read connection status multiple times
+	for i := 0; i < 50; i++ {
+		_ = m.GetConnectionStatus()
+		_ = m.GetStatus()
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	wg.Wait()
+
+	if startErr != nil {
+		t.Fatalf("StartAll failed: %v", startErr)
+	}
+
+	// Final status check
+	status := m.GetConnectionStatus()
+	if status["connected"].(int) != 1 {
+		t.Errorf("Expected 1 connected, got %d", status["connected"].(int))
+	}
+}
+
+// TestGetConnectionStatus verifies the detailed status method.
+func TestGetConnectionStatus(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	// Create channels with different outcomes
+	ch1 := newMockConnectableChannel(0) // Success
+	ch2 := newMockConnectableChannel(1) // Retry then success
+	m.channels["telegram"] = ch1
+	m.channels["discord"] = ch2
+
+	// Set max retries for testing
+	m.config.Channels.Telegram.MaxRetries = 5
+	m.config.Channels.Discord.MaxRetries = 5
+
+	// Fast backoff
+	oldBaseBackoff := defaultBaseBackoffDelay
+	defaultBaseBackoffDelay = 10 * time.Millisecond
+	defer func() { defaultBaseBackoffDelay = oldBaseBackoff }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := m.StartAll(ctx)
+	if err != nil {
+		t.Fatalf("StartAll failed: %v", err)
+	}
+
+	status := m.GetConnectionStatus()
+
+	// Verify structure
+	if status["connected"].(int) != 2 {
+		t.Errorf("Expected connected=2, got %d", status["connected"].(int))
+	}
+	if status["failed"].(int) != 0 {
+		t.Errorf("Expected failed=0, got %d", status["failed"].(int))
+	}
+	if status["total"].(int) != 2 {
+		t.Errorf("Expected total=2, got %d", status["total"].(int))
+	}
+
+	channels := status["channels"].(map[string]any)
+
+	// Verify success channel status
+	successStatus := channels["telegram"].(map[string]any)
+	if !successStatus["connected"].(bool) {
+		t.Error("Success channel should be connected")
+	}
+	if successStatus["attempts"].(int) != 1 {
+		t.Errorf("Success channel: expected attempts=1, got %d", successStatus["attempts"].(int))
+	}
+	if successStatus["max_retries"].(int) != 5 {
+		t.Errorf("Success channel: expected max_retries=5, got %d", successStatus["max_retries"].(int))
+	}
+	if !successStatus["running"].(bool) {
+		t.Error("Success channel should be running")
+	}
+
+	// Verify retry channel status
+	retryStatus := channels["discord"].(map[string]any)
+	if !retryStatus["connected"].(bool) {
+		t.Error("Retry channel should be connected")
+	}
+	if retryStatus["attempts"].(int) != 2 {
+		t.Errorf("Retry channel: expected attempts=2, got %d", retryStatus["attempts"].(int))
+	}
+
+	// Verify last_attempt is set
+	if retryStatus["last_attempt"].(time.Time).IsZero() {
+		t.Error("last_attempt should be set")
+	}
+}
+
+// TestUnregisterChannelCleansUpState verifies connStates is cleaned up.
+func TestUnregisterChannelCleansUpState(t *testing.T) {
+	m := newTestManagerWithConfig()
+
+	ch := newMockConnectableChannel(0)
+	m.channels["test"] = ch
+	m.connStates["test"] = &channelConnectionState{
+		attempts:  1,
+		connected: true,
+	}
+
+	// Note: Not creating workers here since that requires running StartAll
+	// This test focuses on the map cleanup logic
+
+	// Unregister should clean up all maps
+	m.UnregisterChannel("test")
+
+	if _, ok := m.channels["test"]; ok {
+		t.Error("Channel should be removed from channels map")
+	}
+	if _, ok := m.workers["test"]; ok {
+		t.Error("Worker should be removed from workers map")
+	}
+	if _, ok := m.connStates["test"]; ok {
+		t.Error("Connection state should be removed from connStates map")
 	}
 }
